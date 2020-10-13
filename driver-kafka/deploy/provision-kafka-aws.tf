@@ -80,12 +80,12 @@ resource "aws_security_group" "benchmark_security_group" {
   vpc_id = "${aws_vpc.benchmark_vpc.id}"
 
   # SSH access from anywhere
-  # ingress {
-  #   from_port   = 22
-  #   to_port     = 22
-  #   protocol    = "tcp"
-  #   cidr_blocks = ["0.0.0.0/0"]
-  # }
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
   # All ports open within the VPC
   ingress {

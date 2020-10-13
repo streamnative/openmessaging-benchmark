@@ -17,7 +17,7 @@
 # under the License.
 #
 
-name: 1 topic / 1 partition / 1Kb
+name: 1 topic / 1 partition / 2 producer / 2 consumer / 1Kb / 200K Rate
 
 topics: 1
 partitionsPerTopic: 1
@@ -25,8 +25,8 @@ keyDistributor: "NO_KEY"
 messageSize: 1024
 payloadFile: "payload/payload-1Kb.data"
 subscriptionsPerTopic: 1
-consumerPerSubscription: 1
-producersPerTopic: 1
-producerRate: 50000
+consumerPerSubscription: 2
+producersPerTopic: 2
+producerRate: 200000
 consumerBacklogSizeGB: 0
-testDurationMinutes: 15
+testDurationMinutes: 3

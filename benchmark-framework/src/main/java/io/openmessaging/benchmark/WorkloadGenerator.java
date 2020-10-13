@@ -353,7 +353,7 @@ public class WorkloadGenerator implements AutoCloseable {
         }
         worker.resumeConsumers();
 
-        final long minBacklog = 1000;
+        final long minBacklog = 100000;
 
         while (true) {
             CountersStats stats = worker.getCountersStats();

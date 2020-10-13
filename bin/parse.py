@@ -35,8 +35,8 @@ chartStyle = Style(
     plot_background='transparent',
     font_family='googlefont:Montserrat',
     # colors=('#D8365D', '#78365D')
-    colors=('#66CC69', '#173361', '#D8365D'),
-    # colors=('#66CC69', '#667C69', '#173361', '#D8365D', '#78365D'),
+    # colors=('#66CC69', '#173361', '#D8365D'),
+    colors=('#5B8FF9', '#5D7092', '#5AD8A6', '#F6BD16', '#E8684A', '#6DC8EC', '#9270CA', '#FF9D4D', '#269A99', '#FF99C3', '#D3C6EA', '#B6E3F5'),
 )
 
 #theme = pygal.style.CleanStyle
@@ -152,6 +152,7 @@ if __name__ == "__main__":
                         type=str, help='Labels for the series instead of file names on the plot')
     parser.add_argument('--series-opts', nargs='+', dest='opts', required=False,
                         type=str, help='Options for each series: Dashed or Filled')
+    parser.add_argument('--driver', dest='driver', help='Pulsar/Kafka/RabbitMQ', required=True, type=str)
     args = parser.parse_args()
 
     if args.labels != None and len(args.labels) != len(args.files):
@@ -195,7 +196,7 @@ if __name__ == "__main__":
     pub_rate_avg["Throughput (MB/s)"] = []
 
     # colors = ['#66CC69', '#173361', '#D8365D']
-    colors = ['#66CC69', '#667C69', '#173361', '#D8365D', '#78365D']
+    colors = ['#5B8FF9', '#5D7092', '#5AD8A6', '#F6BD16', '#E8684A', '#6DC8EC', '#9270CA', '#FF9D4D', '#269A99', '#FF99C3', '#D3C6EA', '#B6E3F5']
 
     # Aggregate across all runs
     count = 0
@@ -248,32 +249,32 @@ if __name__ == "__main__":
     # Generate latency quantiles
     time_series = zip(drivers, stat_lat_quantile, opts)
     svg = f'{args.msg_size}-{args.durability}-{args.ack}-acks-latency-quantile'
-    create_quantile_chart(svg, 'Publish Latency Quantiles',
+    create_quantile_chart(svg, 'Publish Latency Quantiles(' + args.driver + ')',
                           y_label='Latency (ms)',
                           time_series=time_series)
 
     time_series = zip(drivers, stat_e2e_lat_quantile, opts)
     svg = f'{args.msg_size}-{args.durability}-{args.ack}-acks-e2e-latency-quantile'
-    create_quantile_chart(svg, 'End-to-End Latency Quantiles',
+    create_quantile_chart(svg, 'End-to-End Latency Quantiles(' + args.driver + ')',
                           y_label='Latency (ms)',
                           time_series=time_series)
 
     # Generate p99 latency time-series
     svg = f'{args.msg_size}-{args.durability}-{args.ack}-acks-publish-latency-p99'
     time_series = zip(drivers, stats_lat_p99)
-    create_chart(svg, 'Publish Latency - 99th Percentile',
+    create_chart(svg, 'Publish Latency - 99th Percentile(' + args.driver + ')',
                  y_label='Latency (ms)', time_series=time_series)
 
     # Generate avg E2E latency time-series
     svg = f'{args.msg_size}-{args.durability}-{args.ack}-acks-e2e-latency-avg'
     time_series = zip(drivers, stat_lat_avg)
-    create_chart(svg, 'End-to-end Latency - Average',
+    create_chart(svg, 'End-to-end Latency - Average(' + args.driver + ')',
                  y_label='Latency (ms)', time_series=time_series)
 
     # Generate publish rate
     svg = f'{args.msg_size}-{args.durability}-{args.ack}-acks-publish-rate'
     time_series = zip(drivers, stats_pub_rate)
-    create_chart(svg, 'Publish Rate',
+    create_chart(svg, 'Publish Rate(' + args.driver + ')',
                  y_label='Message/s', time_series=time_series)
 
     # Generate consume + backlog rate
@@ -287,5 +288,5 @@ if __name__ == "__main__":
 
     time_series = zip(labels_con, stats_con_rate,
                       labels_backlog, stats_backlog)
-    create_multi_chart(svg, 'Consume rate (Messages/s - Left) w/ Backlog (No. of Messages - Right)',
+    create_multi_chart(svg, 'Consume rate (Messages/s - Left) w/ Backlog (No. of Messages - Right)(' + args.driver + ')',
                        'Consume - Messages/s', 'Backlog - Messages', time_series)

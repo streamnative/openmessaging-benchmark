@@ -21,7 +21,9 @@ package io.openmessaging.benchmark.driver.pulsar;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
@@ -33,13 +35,17 @@ import org.apache.pulsar.client.admin.PulsarAdminBuilder;
 import org.apache.pulsar.client.admin.PulsarAdminException;
 import org.apache.pulsar.client.admin.PulsarAdminException.ConflictException;
 import org.apache.pulsar.client.api.ClientBuilder;
+import org.apache.pulsar.client.api.Consumer;
 import org.apache.pulsar.client.api.ProducerBuilder;
 import org.apache.pulsar.client.api.PulsarClient;
 import org.apache.pulsar.client.api.SubscriptionType;
+import org.apache.pulsar.common.naming.TopicName;
+import org.apache.pulsar.common.partition.PartitionedTopicMetadata;
 import org.apache.pulsar.common.policies.data.BacklogQuota;
 import org.apache.pulsar.common.policies.data.BacklogQuota.RetentionPolicy;
 import org.apache.pulsar.common.policies.data.PersistencePolicies;
 import org.apache.pulsar.common.policies.data.TenantInfo;
+import org.apache.pulsar.common.util.FutureUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -103,11 +109,14 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
 
         log.info("Created Pulsar admin client for HTTP URL {}", config.client.httpUrl);
 
+        cleanupTopics();
+
         producerBuilder = client.newProducer().enableBatching(config.producer.batchingEnabled)
                 .batchingMaxPublishDelay(config.producer.batchingMaxPublishDelayMs, TimeUnit.MILLISECONDS)
                 .blockIfQueueFull(config.producer.blockIfQueueFull).batchingMaxBytes(config.producer.batchingMaxBytes)
                 .maxPendingMessages(config.producer.pendingQueueSize).batchingMaxMessages(Integer.MAX_VALUE)
-                .maxPendingMessagesAcrossPartitions(Integer.MAX_VALUE);
+                .roundRobinRouterBatchingPartitionSwitchFrequency(config.producer.batchingPartitionSwitchFrequencyByPublishDelay)
+                .maxPendingMessagesAcrossPartitions(config.producer.maxPendingMessagesAcrossPartitions);
 
         try {
             // Create namespace and set the configuration
@@ -173,19 +182,69 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
     @Override
     public CompletableFuture<BenchmarkConsumer> createConsumer(String topic, String subscriptionName,
             Optional<Integer> partition, ConsumerCallback consumerCallback) {
-        return client.newConsumer().priorityLevel(0).subscriptionType(SubscriptionType.Failover)
-                .messageListener((consumer, msg) -> {
-                    consumerCallback.messageReceived(msg.getData(),
-                            TimeUnit.MILLISECONDS.toNanos(msg.getPublishTime()));
-                    consumer.acknowledgeAsync(msg);
-                }).topic(topic).subscriptionName(subscriptionName).subscribeAsync()
-                .thenApply(consumer -> new PulsarBenchmarkConsumer(consumer));
-
+        try {
+            int partitions = 0;
+            PartitionedTopicMetadata partitionedTopicMetadata = adminClient.topics().getPartitionedTopicMetadata(topic);
+            if (partitionedTopicMetadata != null) {
+                partitions = partitionedTopicMetadata.partitions;
+            }
+            List<CompletableFuture<Consumer<byte[]>>> consumers = new ArrayList<>(partitions > 0 ? partitions : 1);
+            for (int i = 0; i < partitions; i++) {
+                CompletableFuture<Consumer<byte[]>> consumer = client.newConsumer().priorityLevel(0).subscriptionType(SubscriptionType.Failover)
+                        .messageListener((c, msg) -> {
+                            consumerCallback.messageReceived(msg.getData(),
+                                    TimeUnit.MILLISECONDS.toNanos(msg.getPublishTime()));
+                            c.acknowledgeAsync(msg);
+                        })
+                        .topic(topic + "-partition-" + i)
+                        .subscriptionName(subscriptionName)
+                        .maxTotalReceiverQueueSizeAcrossPartitions(config.consumer.maxTotalReceiverQueueSizeAcrossPartitions)
+                        .receiverQueueSize(config.consumer.receiverQueueSize)
+                        .subscribeAsync();
+                consumers.add(consumer);
+            }
+            if (partitions == 0) {
+                CompletableFuture<Consumer<byte[]>> consumer = client.newConsumer().priorityLevel(0).subscriptionType(SubscriptionType.Failover)
+                        .messageListener((c, msg) -> {
+                            consumerCallback.messageReceived(msg.getData(),
+                                    TimeUnit.MILLISECONDS.toNanos(msg.getPublishTime()));
+                            c.acknowledgeAsync(msg);
+                        })
+                        .topic(topic)
+                        .subscriptionName(subscriptionName)
+                        .maxTotalReceiverQueueSizeAcrossPartitions(config.consumer.maxTotalReceiverQueueSizeAcrossPartitions)
+                        .receiverQueueSize(config.consumer.receiverQueueSize)
+                        .subscribeAsync();
+                consumers.add(consumer);
+            }
+            List<Consumer<byte[]>> cs = new ArrayList<>(partitions);
+            FutureUtil.waitForAll(consumers).thenAccept(v -> {
+                for (CompletableFuture<Consumer<byte[]>> cf : consumers) {
+                    cf.thenAccept(cs::add);
+                }
+            });
+            return CompletableFuture.completedFuture(new PulsarBenchmarkConsumer(cs));
+        } catch (PulsarAdminException e) {
+            return client.newConsumer().priorityLevel(0).subscriptionType(SubscriptionType.Failover)
+                    .messageListener((consumer, msg) -> {
+                        consumerCallback.messageReceived(msg.getData(),
+                                TimeUnit.MILLISECONDS.toNanos(msg.getPublishTime()));
+                        consumer.acknowledgeAsync(msg);
+                    })
+                    .topic(topic)
+                    .subscriptionName(subscriptionName)
+                    .maxTotalReceiverQueueSizeAcrossPartitions(config.consumer.maxTotalReceiverQueueSizeAcrossPartitions)
+                    .receiverQueueSize(config.consumer.receiverQueueSize)
+                    .subscribeAsync()
+                    .thenApply(consumer -> new PulsarBenchmarkConsumer(Collections.singletonList(consumer)));
+        }
     }
 
     @Override
     public void close() throws Exception {
         log.info("Shutting down Pulsar benchmark driver");
+
+        cleanupTopics();
 
         if (client != null) {
             client.close();
@@ -196,6 +255,28 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
         }
 
         log.info("Pulsar benchmark driver successfully shut down");
+    }
+
+    private void cleanupTopics() {
+        log.info("Starting to delete all retained topics and namespaces ...");
+
+        try {
+            List<String> namespaces = adminClient.namespaces().getNamespaces("benchmark");
+            for (String namespace : namespaces) {
+                List<String> topics = adminClient.topics().getList(namespace);
+                for (String topic : topics) {
+                    List<String> subs = adminClient.topics().getSubscriptions(topic);
+                    for (String sub : subs) {
+                        adminClient.topics().deleteSubscription(topic, sub, true);
+                    }
+                    adminClient.topics().delete(topic, true);
+                }
+            }
+        } catch (PulsarAdminException e) {
+            log.error("Failed to delete retained topics and namespaces", e);
+        }
+
+        log.info("Ending delete all retained topics and namespaces.");
     }
 
     private static final ObjectMapper mapper = new ObjectMapper(new YAMLFactory())

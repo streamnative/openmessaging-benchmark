@@ -17,26 +17,26 @@
 # under the License.
 #
 
-- name: Collect profiles
-  hosts: kafka, client
-  become: true
-  tags:
-    - profile
-  tasks:
-    - set_fact:
-        time: "{{ ansible_date_time.epoch }}"
-    - name: Generate Flame graph
-      tags:
-        - flame
-      shell: |
-        /tmp/profiler.sh -d 120 `pidof java` -f /tmp/flame.svg
-    - name: Fetch flame graph
-      tags:
-        - flame
-      fetch:
-        src: /tmp/flame.svg
-        dest: results/{{ group_names[0] }}/{{ time }}/{{ inventory_hostname }}/flame.svg
-        flat: yes
+# - name: Collect profiles
+#   hosts: kafka, client
+#   become: true
+#   tags:
+#     - profile
+#   tasks:
+#     - set_fact:
+#         time: "{{ ansible_date_time.epoch }}"
+#     - name: Generate Flame graph
+#       tags:
+#         - flame
+#       shell: |
+#         /tmp/profiler.sh -d 120 `pidof java` -f /tmp/flame.svg
+#     - name: Fetch flame graph
+#       tags:
+#         - flame
+#       fetch:
+#         src: /tmp/flame.svg
+#         dest: results/{{ group_names[0] }}/{{ time }}/{{ inventory_hostname }}/flame.svg
+#         flat: yes
 
     # - name: Dump & compress heap
     #   tags:
@@ -53,19 +53,19 @@
     #     dest: results/{{ group_names[0] }}/{{ time }}/{{ inventory_hostname }}/heap.tar
     #     flat: yes
 
-    - name: Heap allocation profile
-      tags:
-        - heap
-      shell: |
-        /tmp/profiler.sh -d 60 -e alloc -o svg -f /tmp/heap.svg 1 `pidof java`
-        chmod 777 /tmp/heap.svg
-    - name: Fetch heap dump
-      tags:
-        - heap
-      fetch:
-        src: /tmp/heap.svg
-        dest: results/{{ group_names[0] }}/{{ time }}/{{ inventory_hostname }}/heap.svg
-        flat: yes
+    # - name: Heap allocation profile
+    #   tags:
+    #     - heap
+    #   shell: |
+    #     /tmp/profiler.sh -d 60 -e alloc -o svg -f /tmp/heap.svg 1 `pidof java`
+    #     chmod 777 /tmp/heap.svg
+    # - name: Fetch heap dump
+    #   tags:
+    #     - heap
+    #   fetch:
+    #     src: /tmp/heap.svg
+    #     dest: results/{{ group_names[0] }}/{{ time }}/{{ inventory_hostname }}/heap.svg
+    #     flat: yes
 
 - name: Format and mount disks for Kafka hosts
   hosts: kafka
@@ -137,7 +137,7 @@
     #################### Release ####################
     - name: Download Kafka package
       unarchive:
-        src: http://mirrors.ocf.berkeley.edu/apache/kafka/{{ kafkaVersion }}/kafka_2.13-{{ kafkaVersion }}.tgz
+        src: https://downloads.apache.org/kafka/{{ kafkaVersion }}/kafka_2.13-{{ kafkaVersion }}.tgz
         remote_src: yes
         dest: /opt/kafka
         extra_opts: ["--strip-components=1"]

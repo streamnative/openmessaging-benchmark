@@ -17,15 +17,15 @@
 # under the License.
 #
 
-name: 1 producer / 1 consumers on 1 topic
+name: 1 topic / 100 partitions / 2 producer / 2 consumer / 1Kb / 200K Rate
 
 topics: 1
 partitionsPerTopic: 100
 messageSize: 1024
 payloadFile: "payload/payload-1Kb.data"
 subscriptionsPerTopic: 1
-consumerPerSubscription: 1
-producersPerTopic: 1
-producerRate: 50000
+consumerPerSubscription: 2
+producersPerTopic: 2
+producerRate: 200000
 consumerBacklogSizeGB: 0
-testDurationMinutes: 240
+testDurationMinutes: 3

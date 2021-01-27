@@ -1,0 +1,148 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+- name: Format and mount disks for Pulsar/BookKeeper hosts
+  hosts: broker
+  connection: ssh
+  become: true
+  tasks:
+    - command: >
+        tuned-adm profile latency-performance
+    - name: Format disks
+      filesystem:
+        fstype: xfs
+        dev: '{{ item }}'
+      with_items:
+        - '/dev/nvme1n1'
+        - '/dev/nvme2n1'
+    - name: Mount disks
+      mount:
+        path: "{{ item.path }}"
+        src: "{{ item.src }}"
+        fstype: xfs
+        opts: defaults,noatime,nodiscard
+        state: mounted
+      with_items:
+        - { path: "/mnt/data-1", src: "/dev/nvme1n1" }
+        - { path: "/mnt/data-2", src: "/dev/nvme2n1" }
+
+- name: Setup common packages
+  hosts: all
+  connection: ssh
+  become: true
+  tasks:
+    - name: Remove sysstat
+      yum: pkg={{ item }} state=absent
+      with_items:
+        - sysstat
+    - name: Install RPM packages
+      yum: pkg={{ item }} state=latest
+      with_items:
+        - wget
+        - java-11
+        - sysstat
+        - vim
+        - chrony
+        - git
+        - gcc
+
+- name: Chrony setup
+  hosts: all
+  connection: ssh
+  become: true
+  tasks:
+    - name: Set up chronyd
+      template:
+        src: "conf/chrony.conf"
+        dest: "/etc/chrony.conf"
+    - systemd:
+        state: restarted
+        daemon_reload: yes
+        name: "chronyd"
+
+- name: Get Maven version
+  hosts: localhost
+  become: false
+  tasks:
+    - shell: >
+        cat ../../pom.xml | xmllint --format - \
+          | sed "s/xmlns=\".*\"//g" | xmllint --stream --pattern /project/version --debug - \
+          | grep -A 2 "matches pattern" | grep text | sed "s/.* [0-9] //g"
+      register: maven_version
+    - set_fact:
+        benchmark_version: "{{ maven_version.stdout }}"
+
+- name: Install Node exporter on Brokers to collect system metrics
+  hosts: broker
+  become: true
+  tasks:
+    - name: Add user node_exporter
+      user:
+        name: node_exporter
+        shell: /bin/false
+        system: true
+        create_home: no
+
+    - name: Download and extract
+      unarchive:
+        src: https://github.com/prometheus/node_exporter/releases/download/v1.0.1/node_exporter-1.0.1.linux-amd64.tar.gz
+        dest: /tmp
+        remote_src: yes
+
+    - name: Copy bin node_exporter to /usr/local/bin
+      copy:
+        src: /tmp/node_exporter-1.0.1.linux-amd64/node_exporter
+        remote_src: yes
+        dest: /usr/local/bin/
+        owner: node_exporter
+        group: node_exporter
+        mode: u+x,g+x,o+x
+
+    - name: Create service node_exporter.service
+      blockinfile:
+        path: /etc/systemd/system/node_exporter.service
+        block: |
+          [Unit]
+          Description=Prometheus Node Exporter
+          Wants=network-online.target
+          After=network-online.target
+          [Service]
+          User=node_exporter
+          Group=node_exporter
+          Type=simple
+          ExecStart=/usr/local/bin/node_exporter
+          [Install]
+          WantedBy=multi-user.target
+        create: true
+
+    - name: systemctl daemon_reload
+      systemd:
+        daemon_reload: yes
+
+    - name: Start and Enable node_exporter
+      service:
+        name: node_exporter
+        state: started
+        enabled: yes
+
+    - name: Check whether port 9100 is available
+      wait_for:
+        port: 9100
+        state: started
+        timeout: 5
